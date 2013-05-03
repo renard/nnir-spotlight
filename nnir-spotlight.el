@@ -5,7 +5,7 @@
 ;; Author: Sébastien Gross <seb•ɑƬ•chezwam•ɖɵʈ•org>
 ;; Keywords: emacs, 
 ;; Created: 2013-05-03
-;; Last changed: 2013-05-03 20:07:09
+;; Last changed: 2013-05-03 20:56:04
 ;; Licence: WTFPL, grab your copy here: http://sam.zoy.org/wtfpl/
 
 ;; This file is NOT part of GNU Emacs.
@@ -28,17 +28,18 @@
 
 (defun nnir-spotlight-get-dovecot-uid (path)
   "return dovecot uid from PATH"
-  (let ((uids (make-hash-table :test 'equal)))
-    (with-temp-buffer
-      (insert-file-contents
-       (format "%s/dovecot-uidlist" path))
-      (loop for l in (split-string (buffer-substring (point-min) (point-max)) "\n")
-	    for items = (split-string l ":" )
-	    for file = (cadr items)
-	    for id =  (car (split-string (car items) " "))
-	    when file
-	    do (puthash file id uids)))
-    uids))
+  (let ((uids (make-hash-table :test 'equal))
+	(file (format "%s/dovecot-uidlist" path)))
+    (when (file-exists-p file)
+      (with-temp-buffer
+	(insert-file-contents file)
+	(loop for l in (split-string (buffer-substring (point-min) (point-max)) "\n")
+	      for items = (split-string l ":" )
+	      for file = (cadr items)
+	      for id =  (car (split-string (car items) " "))
+	      when file
+	      do (puthash file id uids)))
+      uids)))
 
 (defun nnir-run-spotlight (query srv &optional groups)
   "Search `gnus-group-make-nnir-group' using MacOSX spotlight feature.
@@ -60,14 +61,22 @@ Your `gnus-secondary-select-methods' looks like:
        (nnimap-stream shell)
        (nnimap-shell-program
         \"MAIL=maildir:~/Library/Mail/Boxes:LAYOUT=fs \"
-        \"/usr/local/Cellar/dovecot/2.1.9/libexec/imap\")))"
+        \"/usr/local/Cellar/dovecot/2.1.9/libexec/imap\")))
+
+
+If `gnus-group-make-nnir-group' is called with
+`universal-argument' (`nnir-extra-parms' is set), the search is
+done in all group from current server (this might take a while)."
   (let* ((method (gnus-server-to-method server))
 	 (type (car method))
 	 (name (cadr method))
 	 (directory (expand-file-name (cadr (assoc 'nnir-spotlight-dir method))))
+	 (groups (if nnir-extra-parms (gnus-groups-from-server server) groups))
 	 ;;(groups (or groups '(".:")))
 	 (regexp (cdr (assoc 'query query))))
 
+    ;;(message "S:%S P:%S E:%S G:%S" server nnir-extra-parms parms groups)
+    
     ;;(message "M: %S D: %S R: %S" method directory regexp)
     ;;(message "Q: %S S:%S G:%S" query srv groups)
     (let ((ret
@@ -81,6 +90,7 @@ Your `gnus-secondary-select-methods' looks like:
 			    (shell-quote-argument regexp))
 		 for uidlist = (nnir-spotlight-get-dovecot-uid
 				(format "%s/%s" directory path))
+		 when uidlist
 		 nconc (loop for f in (split-string
 				       (shell-command-to-string cmd)
 				       "\n" t)
@@ -89,6 +99,7 @@ Your `gnus-secondary-select-methods' looks like:
 					       (file-name-nondirectory f)
 					       ":" t))
 			     for id = (gethash file-base uidlist)
+			     when id
 			     collect
 			     (vector
 			      group
